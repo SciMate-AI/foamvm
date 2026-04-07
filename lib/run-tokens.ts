@@ -26,6 +26,25 @@ export interface RunHistoryItem {
   errorMessage: string | null
 }
 
+export interface UserSandboxOutputFile {
+  id: string
+  filename: string
+  sizeBytes: number
+  contentType: string | null
+  createdAt: string
+  isImage: boolean
+  url: string
+}
+
+export interface UserSandboxOutputGroup {
+  runId: string
+  sandboxSessionId: string | null
+  promptExcerpt: string | null
+  status: string
+  createdAt: string
+  files: UserSandboxOutputFile[]
+}
+
 export interface AdminTokenRow {
   id: string
   status: string
@@ -263,6 +282,59 @@ export async function listUserRunHistory(userId: string): Promise<RunHistoryItem
     createdAt: row.created_at as string,
     errorMessage: (row.error_message as string | null) ?? null,
   }))
+}
+
+export async function listUserSandboxOutputGroups(userId: string): Promise<UserSandboxOutputGroup[]> {
+  const admin = createAdminSupabaseClient()
+  const { data, error } = await admin
+    .from('run_consumptions')
+    .select(`
+      id,
+      sandbox_session_id,
+      prompt_excerpt,
+      status,
+      created_at,
+      run_output_files (
+        id,
+        filename,
+        size_bytes,
+        content_type,
+        is_image,
+        created_at
+      )
+    `)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (error) {
+    throw new Error(`Failed to load sandbox outputs: ${error.message}`)
+  }
+
+  return (data ?? [])
+    .map((row) => {
+      const files = Array.isArray((row as { run_output_files?: unknown[] }).run_output_files)
+        ? (row as { run_output_files: Record<string, unknown>[] }).run_output_files
+        : []
+
+      return {
+        runId: row.id as string,
+        sandboxSessionId: (row.sandbox_session_id as string | null) ?? null,
+        promptExcerpt: (row.prompt_excerpt as string | null) ?? null,
+        status: row.status as string,
+        createdAt: row.created_at as string,
+        files: files.map((file) => ({
+          id: file.id as string,
+          filename: file.filename as string,
+          sizeBytes: Number(file.size_bytes ?? 0),
+          contentType: (file.content_type as string | null) ?? null,
+          createdAt: file.created_at as string,
+          isImage: Boolean(file.is_image),
+          url: `/api/files?id=${encodeURIComponent(file.id as string)}`,
+        })),
+      }
+    })
+    .filter((group) => group.files.length > 0)
 }
 
 export async function listAdminRunTokens(): Promise<AdminTokenRow[]> {

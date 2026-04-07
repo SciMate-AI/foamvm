@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ViewerContext } from '@/lib/auth'
@@ -9,9 +10,16 @@ type RunStatus = 'idle' | 'running' | 'done' | 'error'
 
 interface LogEntry {
   id: number
-  kind: 'status' | 'assistant' | 'tool_use' | 'tool_result' | 'log' | 'stderr' | 'error'
+  kind: 'status' | 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'log' | 'stderr' | 'error'
   text: string
   detail?: string
+  todos?: TodoItem[]
+}
+
+interface TodoItem {
+  status: string
+  content: string
+  activeForm?: string
 }
 
 interface ImageResult {
@@ -46,37 +54,323 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-function extractClaudeEvent(payload: Record<string, unknown>): { kind: LogEntry['kind']; text: string; detail?: string } | null {
+function normalizeMarkdownText(text: string): string {
+  const lines = text.replace(/\r/g, '').split('\n')
+  const numberedLines = lines.filter((line) => line.trim()).filter((line) => /^\d+\t/.test(line))
+
+  if (numberedLines.length > 0 && numberedLines.length >= Math.ceil(lines.filter((line) => line.trim()).length * 0.6)) {
+    return lines.map((line) => line.replace(/^\d+\t/, '')).join('\n')
+  }
+
+  return text
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const parts = text.split(/(`[^`]+`)/g)
+
+  return parts.map((part, index) => {
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+      return (
+        <code className="rounded bg-white/8 px-1 py-0.5 text-[0.95em] text-white" key={index}>
+          {part.slice(1, -1)}
+        </code>
+      )
+    }
+
+    return <span key={index}>{part}</span>
+  })
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+function isTableSeparator(line: string): boolean {
+  return /^\|?\s*[:\- ]+\|[:\-| ]+\|?\s*$/.test(line.trim())
+}
+
+function renderHeading(level: number, content: string, key: string) {
+  const rendered = renderInlineMarkdown(content)
+
+  if (level === 1) {
+    return <h1 className="text-sm font-semibold text-white" key={key}>{rendered}</h1>
+  }
+  if (level === 2) {
+    return <h2 className="text-sm font-semibold text-white" key={key}>{rendered}</h2>
+  }
+  if (level === 3) {
+    return <h3 className="text-xs font-semibold text-slate-100" key={key}>{rendered}</h3>
+  }
+  if (level === 4) {
+    return <h4 className="text-xs font-semibold text-slate-100" key={key}>{rendered}</h4>
+  }
+  if (level === 5) {
+    return <h5 className="text-xs font-semibold text-slate-100" key={key}>{rendered}</h5>
+  }
+  return <h6 className="text-xs font-semibold text-slate-100" key={key}>{rendered}</h6>
+}
+
+function MarkdownText({ text }: { text: string }) {
+  const normalized = normalizeMarkdownText(text)
+  const lines = normalized.split('\n')
+  const blocks: ReactNode[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const line = lines[index]
+
+    if (!line.trim()) {
+      index += 1
+      continue
+    }
+
+    if (line.startsWith('```')) {
+      const codeLines: string[] = []
+      const language = line.slice(3).trim()
+      index += 1
+      while (index < lines.length && !lines[index].startsWith('```')) {
+        codeLines.push(lines[index])
+        index += 1
+      }
+      if (index < lines.length && lines[index].startsWith('```')) {
+        index += 1
+      }
+
+      blocks.push(
+        <pre className="overflow-x-auto rounded-xl border border-white/5 bg-black/30 p-3 text-[11px] text-slate-200" key={`code-${blocks.length}`}>
+          {language ? <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-white/35">{language}</div> : null}
+          <code>{codeLines.join('\n')}</code>
+        </pre>,
+      )
+      continue
+    }
+
+    if (/^#{1,6}\s+/.test(line)) {
+      const level = Math.min((line.match(/^#+/)?.[0].length ?? 1), 6)
+      const content = line.replace(/^#{1,6}\s+/, '')
+      blocks.push(renderHeading(level, content, `heading-${blocks.length}`))
+      index += 1
+      continue
+    }
+
+    if (line.includes('|') && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
+      const header = splitTableRow(line)
+      const rows: string[][] = []
+      index += 2
+
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+        rows.push(splitTableRow(lines[index]))
+        index += 1
+      }
+
+      blocks.push(
+        <div className="overflow-x-auto" key={`table-${blocks.length}`}>
+          <table className="min-w-full border-collapse text-[11px] text-slate-200">
+            <thead>
+              <tr>
+                {header.map((cell, cellIndex) => (
+                  <th className="border border-white/10 bg-white/5 px-2 py-1 text-left font-semibold" key={cellIndex}>
+                    {renderInlineMarkdown(cell)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td className="border border-white/10 px-2 py-1 align-top" key={cellIndex}>
+                      {renderInlineMarkdown(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+
+    if (/^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line)) {
+      const ordered = /^\d+\.\s+/.test(line)
+      const items: string[] = []
+
+      while (index < lines.length) {
+        const current = lines[index]
+        if (ordered && /^\d+\.\s+/.test(current)) {
+          items.push(current.replace(/^\d+\.\s+/, ''))
+          index += 1
+          continue
+        }
+        if (!ordered && /^[-*]\s+/.test(current)) {
+          items.push(current.replace(/^[-*]\s+/, ''))
+          index += 1
+          continue
+        }
+        break
+      }
+
+      const ListTag = ordered ? 'ol' : 'ul'
+      blocks.push(
+        <ListTag className="ml-5 space-y-1 text-slate-200" key={`list-${blocks.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ListTag>,
+      )
+      continue
+    }
+
+    const paragraphLines: string[] = []
+    while (index < lines.length && lines[index].trim() && !lines[index].startsWith('```') && !/^#{1,6}\s+/.test(lines[index])) {
+      if (lines[index].includes('|') && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
+        break
+      }
+      if (/^[-*]\s+/.test(lines[index]) || /^\d+\.\s+/.test(lines[index])) {
+        break
+      }
+      paragraphLines.push(lines[index])
+      index += 1
+    }
+
+    blocks.push(
+      <p className="whitespace-pre-wrap break-words text-slate-200" key={`paragraph-${blocks.length}`}>
+        {paragraphLines.map((paragraphLine, paragraphIndex) => (
+          <span key={paragraphIndex}>
+            {renderInlineMarkdown(paragraphLine)}
+            {paragraphIndex < paragraphLines.length - 1 ? <br /> : null}
+          </span>
+        ))}
+      </p>,
+    )
+  }
+
+  return <div className="space-y-2">{blocks}</div>
+}
+
+function extractTodos(input: unknown): TodoItem[] | null {
+  if (!input || typeof input !== 'object' || !('todos' in input)) {
+    return null
+  }
+
+  const rawTodos = Array.isArray((input as { todos?: unknown[] }).todos) ? (input as { todos: unknown[] }).todos : []
+  const todos: TodoItem[] = []
+
+  for (const todo of rawTodos) {
+    if (!todo || typeof todo !== 'object') continue
+
+    const status = typeof (todo as { status?: unknown }).status === 'string' ? (todo as { status: string }).status : 'pending'
+    const content = typeof (todo as { content?: unknown }).content === 'string' ? (todo as { content: string }).content : 'Task'
+    const activeForm = typeof (todo as { activeForm?: unknown }).activeForm === 'string'
+      ? (todo as { activeForm: string }).activeForm
+      : undefined
+
+    todos.push({ status, content, activeForm })
+  }
+
+  return todos.length > 0 ? todos : null
+}
+
+function summarizeToolUse(name: string, input: unknown): { text: string; todos?: TodoItem[] } {
+  if (name === 'TodoWrite' && input && typeof input === 'object' && 'todos' in input) {
+    const todos = extractTodos(input)
+    if (todos) {
+      const inProgress = todos.find((todo) => todo.status === 'in_progress')
+      return {
+        text: inProgress?.activeForm || inProgress?.content || 'Updating task checklist',
+        todos,
+      }
+    }
+  }
+
+  return { text: `[${name}]` }
+}
+
+function extractClaudeEvent(payload: Record<string, unknown>): { kind: LogEntry['kind']; text: string; detail?: string; todos?: TodoItem[] }[] {
+  const entries: { kind: LogEntry['kind']; text: string; detail?: string; todos?: TodoItem[] }[] = []
   const type = payload.type as string
-  if (type === 'assistant') {
-    const msg = payload.message as { content?: { type: string; text?: string }[] } | undefined
+
+  if (type === 'user') {
+    const msg = payload.message as {
+      content?: { type: string; text?: string; content?: unknown; tool_use_id?: string }[]
+    } | undefined
     const content = msg?.content ?? []
-    const texts = content.filter((item) => item.type === 'text').map((item) => item.text ?? '').join('')
-    if (!texts) return null
-    return { kind: 'assistant', text: texts }
+    for (const item of content) {
+      if (item.type === 'text' && item.text) {
+        entries.push({ kind: 'user', text: item.text })
+      }
+      if (item.type === 'tool_result') {
+        const toolResultText =
+          typeof item.content === 'string'
+            ? item.content
+            : item.content && typeof item.content === 'object' && 'file' in item.content &&
+                typeof (item.content as { file?: { content?: unknown } }).file?.content === 'string'
+              ? ((item.content as { file: { content: string } }).file.content)
+              : null
+
+        if (toolResultText) {
+          entries.push({
+            kind: 'user',
+            text: toolResultText,
+            detail: item.tool_use_id ? `tool_use_id: ${item.tool_use_id}` : undefined,
+          })
+        }
+      }
+    }
+    return entries
+  }
+
+  if (type === 'assistant') {
+    const msg = payload.message as {
+      content?: { type: string; text?: string; name?: string; input?: unknown }[]
+    } | undefined
+    const content = msg?.content ?? []
+    for (const item of content) {
+      if (item.type === 'text' && item.text) {
+        entries.push({ kind: 'assistant', text: item.text })
+      }
+      if (item.type === 'tool_use') {
+        entries.push({
+          kind: 'tool_use',
+          ...summarizeToolUse(item.name ?? 'tool', item.input),
+          detail: typeof item.input === 'string' ? item.input : JSON.stringify(item.input, null, 2),
+        })
+      }
+    }
+    return entries
   }
   if (type === 'tool_use') {
     const toolPayload = payload as { name?: string; input?: unknown }
-    return {
+    entries.push({
       kind: 'tool_use',
-      text: `[${toolPayload.name ?? 'tool'}]`,
+      ...summarizeToolUse(toolPayload.name ?? 'tool', toolPayload.input),
       detail: typeof toolPayload.input === 'string' ? toolPayload.input : JSON.stringify(toolPayload.input, null, 2),
-    }
+    })
+    return entries
   }
   if (type === 'tool_result') {
     const content = (payload as { content?: unknown }).content
     const text = typeof content === 'string' ? content : JSON.stringify(content)
-    return {
+    entries.push({
       kind: 'tool_result',
       text: text.slice(0, 500) + (text.length > 500 ? '...' : ''),
-    }
+    })
+    return entries
   }
   if (type === 'result') {
     const result = (payload as { result?: string }).result ?? ''
-    if (!result) return null
-    return { kind: 'assistant', text: result }
+    if (result) {
+      entries.push({ kind: 'assistant', text: result })
+    }
+    return entries
   }
-  return null
+  return entries
 }
 
 function LogLine({ entry }: { entry: LogEntry }) {
@@ -84,6 +378,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
 
   const colors: Record<LogEntry['kind'], string> = {
     status: 'text-sky-300',
+    user: 'text-cyan-200',
     assistant: 'text-emerald-300',
     tool_use: 'text-amber-300',
     tool_result: 'text-slate-400',
@@ -96,8 +391,36 @@ function LogLine({ entry }: { entry: LogEntry }) {
     <div className={`log-entry rounded-2xl border border-white/5 bg-white/[0.02] px-3 py-2 font-mono text-xs leading-relaxed ${colors[entry.kind]}`}>
       <div className="flex items-start gap-2">
         <span className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-white/30">{entry.kind}</span>
-        <span className="whitespace-pre-wrap break-words">{entry.text}</span>
+        <div className="min-w-0 flex-1">
+          {entry.kind === 'assistant' || entry.kind === 'user' ? (
+            <MarkdownText text={entry.text} />
+          ) : (
+            <span className="whitespace-pre-wrap break-words">{entry.text}</span>
+          )}
+        </div>
       </div>
+      {entry.todos ? (
+        <div className="mt-2 rounded-xl border border-white/5 bg-black/20 p-3 text-[11px] text-slate-200">
+          <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-white/35">Checklist</div>
+          <div className="space-y-1.5">
+            {entry.todos.map((todo, index) => {
+              const marker =
+                todo.status === 'completed' ? '[x]' :
+                todo.status === 'in_progress' ? '[~]' :
+                '[ ]'
+
+              return (
+                <div className="flex gap-2" key={`${todo.content}-${index}`}>
+                  <span className="text-white/45">{marker}</span>
+                  <span className="whitespace-pre-wrap break-words">
+                    {todo.activeForm || todo.content}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
       {entry.detail ? (
         <div className="mt-2">
           <button
@@ -236,8 +559,10 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
         setRemainingRuns(Number(event.remainingRuns) || 0)
         break
       case 'claude': {
-        const result = extractClaudeEvent(event.payload as Record<string, unknown>)
-        if (result) addLog(result.kind, result.text, result.detail)
+        const results = extractClaudeEvent(event.payload as Record<string, unknown>)
+        for (const result of results) {
+          addLog(result.kind, result.text, result.detail)
+        }
         break
       }
       case 'log':

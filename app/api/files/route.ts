@@ -30,17 +30,25 @@ export async function GET(request: NextRequest) {
   }
 
   const admin = createAdminSupabaseClient()
-  const { data, error } = await admin.storage.from(getOutputBucketName()).download(file.storagePath)
+  const { data, error } = await admin.storage
+    .from(getOutputBucketName())
+    .createSignedUrl(file.storagePath, 60 * 10, {
+      download: file.filename,
+    })
 
-  if (error || !data) {
-    return NextResponse.json({ error: 'Unable to download file' }, { status: 500 })
+  if (error || !data?.signedUrl) {
+    return NextResponse.json(
+      {
+        error: `Unable to create download link${error?.message ? `: ${error.message}` : ''}`,
+      },
+      { status: 500 },
+    )
   }
 
-  return new NextResponse(Buffer.from(await data.arrayBuffer()), {
+  return NextResponse.redirect(data.signedUrl, {
+    status: 302,
     headers: {
-      'Content-Type': file.contentType,
-      'Content-Disposition': `attachment; filename="${file.filename}"`,
-      'Content-Length': String(file.sizeBytes),
+      'Cache-Control': 'private, no-store',
     },
   })
 }

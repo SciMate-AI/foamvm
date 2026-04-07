@@ -39,10 +39,21 @@ create table if not exists public.run_consumptions (
   run_token_id uuid not null references public.run_tokens (id) on delete restrict,
   prompt_excerpt text,
   sandbox_session_id text,
+  command_pid bigint,
   status text not null default 'starting' check (status in ('starting', 'running', 'completed', 'failed')),
   error_message text,
   created_at timestamptz not null default now()
 );
+
+create table if not exists public.run_events (
+  id bigint generated always as identity primary key,
+  consumption_id uuid not null references public.run_consumptions (id) on delete cascade,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists run_events_consumption_id_id_idx
+  on public.run_events (consumption_id, id);
 
 create table if not exists public.run_output_files (
   id uuid primary key default gen_random_uuid(),
@@ -195,6 +206,7 @@ $$;
 alter table public.profiles enable row level security;
 alter table public.run_tokens enable row level security;
 alter table public.run_consumptions enable row level security;
+alter table public.run_events enable row level security;
 alter table public.run_output_files enable row level security;
 
 create policy "profiles_select_own"
@@ -224,6 +236,19 @@ using (
     select 1
     from public.run_consumptions
     where public.run_consumptions.id = public.run_output_files.consumption_id
+      and public.run_consumptions.user_id = auth.uid()
+  )
+);
+
+create policy "run_events_select_own"
+on public.run_events
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.run_consumptions
+    where public.run_consumptions.id = public.run_events.consumption_id
       and public.run_consumptions.user_id = auth.uid()
   )
 );

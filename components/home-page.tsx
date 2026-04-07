@@ -25,6 +25,21 @@ interface FileResult {
   size: number
 }
 
+interface RunSummary {
+  id: string
+  status: 'starting' | 'running' | 'completed' | 'failed'
+  sandboxSessionId: string | null
+  commandPid: number | null
+  promptExcerpt: string | null
+  createdAt: string
+  errorMessage: string | null
+}
+
+interface PersistedRunEvent {
+  id: number
+  payload: Record<string, unknown>
+}
+
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -145,11 +160,16 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [images, setImages] = useState<ImageResult[]>([])
   const [files, setFiles] = useState<FileResult[]>([])
+  const [runId, setRunId] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [remainingRuns, setRemainingRuns] = useState(viewer.availableRuns)
   const logCounter = useRef(0)
   const logEndRef = useRef<HTMLDivElement>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const streamAbortRef = useRef<AbortController | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const currentRunIdRef = useRef<string | null>(null)
+  const lastEventIdRef = useRef(0)
+  const statusRef = useRef<RunStatus>('idle')
 
   const addLog = useCallback((kind: LogEntry['kind'], text: string, detail?: string) => {
     setLogs((previous) => [...previous, { id: logCounter.current++, kind, text, detail }])
@@ -159,7 +179,51 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
-  const handleEvent = useCallback((event: Record<string, unknown>) => {
+  useEffect(() => {
+    currentRunIdRef.current = runId
+  }, [runId])
+
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
+
+  const stopStreaming = useCallback(() => {
+    streamAbortRef.current?.abort()
+    streamAbortRef.current = null
+    clearReconnectTimer()
+  }, [clearReconnectTimer])
+
+  useEffect(() => () => {
+    stopStreaming()
+  }, [stopStreaming])
+
+  const resetRunView = useCallback(() => {
+    setLogs([])
+    setImages([])
+    setFiles([])
+    setSessionId(null)
+    setRunId(null)
+    currentRunIdRef.current = null
+    lastEventIdRef.current = 0
+    logCounter.current = 0
+  }, [])
+
+  const applyEvent = useCallback((event: Record<string, unknown>) => {
+    const eventId = typeof event.eventId === 'number' ? event.eventId : null
+    if (eventId != null) {
+      if (eventId <= lastEventIdRef.current) {
+        return
+      }
+      lastEventIdRef.current = eventId
+    }
+
     const type = event.type as string
     switch (type) {
       case 'status':
@@ -198,7 +262,26 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
     }
   }, [addLog])
 
-  async function readErrorMessage(response: Response): Promise<string> {
+  const syncRunState = useCallback((run: RunSummary) => {
+    setRunId(run.id)
+    currentRunIdRef.current = run.id
+    setSessionId(run.sandboxSessionId)
+
+    if (run.status === 'completed') {
+      setStatus('done')
+      return false
+    }
+
+    if (run.status === 'failed') {
+      setStatus('error')
+      return false
+    }
+
+    setStatus('running')
+    return true
+  }, [])
+
+  const readErrorMessage = useCallback(async (response: Response): Promise<string> => {
     try {
       const payload = await response.json()
       if (typeof payload.error === 'string') {
@@ -210,30 +293,64 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
     }
 
     return `Request failed with status ${response.status}`
-  }
+  }, [])
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!prompt.trim() || status === 'running' || !viewer.user || remainingRuns <= 0) {
-      return
+  const fetchRunSnapshot = useCallback(async (targetRunId: string): Promise<{ run: RunSummary; events: PersistedRunEvent[] }> => {
+    const response = await fetch(`/api/cfd/${encodeURIComponent(targetRunId)}`)
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response))
     }
 
-    setStatus('running')
-    setLogs([])
-    setImages([])
-    setFiles([])
-    setSessionId(null)
+    return response.json()
+  }, [readErrorMessage])
 
-    abortRef.current = new AbortController()
+  const hydrateRunRef = useRef<(targetRunId: string, reset: boolean) => Promise<void>>(async () => {})
+  const openStreamRef = useRef<(targetRunId: string) => Promise<void>>(async () => {})
+
+  const scheduleReconnect = useCallback((targetRunId: string) => {
+    clearReconnectTimer()
+    reconnectTimerRef.current = setTimeout(() => {
+      void hydrateRunRef.current(targetRunId, false).catch(() => {
+        if (currentRunIdRef.current === targetRunId) {
+          addLog('error', 'Unable to restore the running session.')
+          setStatus('error')
+        }
+      })
+    }, 1200)
+  }, [addLog, clearReconnectTimer])
+
+  hydrateRunRef.current = async (targetRunId: string, reset: boolean) => {
+    stopStreaming()
+
+    if (reset) {
+      resetRunView()
+      setStatus('running')
+    }
+
+    const snapshot = await fetchRunSnapshot(targetRunId)
+    const shouldStream = syncRunState(snapshot.run)
+
+    for (const event of snapshot.events) {
+      applyEvent({
+        ...event.payload,
+        eventId: event.id,
+      })
+    }
+
+    if (shouldStream && currentRunIdRef.current === targetRunId) {
+      await openStreamRef.current(targetRunId)
+    }
+  }
+
+  openStreamRef.current = async (targetRunId: string) => {
+    stopStreaming()
+
+    const controller = new AbortController()
+    streamAbortRef.current = controller
 
     try {
-      const response = await fetch('/api/cfd', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prompt }),
-        signal: abortRef.current.signal,
+      const response = await fetch(`/api/cfd/${encodeURIComponent(targetRunId)}/events?after=${lastEventIdRef.current}`, {
+        signal: controller.signal,
       })
 
       if (!response.ok || !response.body) {
@@ -258,7 +375,7 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
           if (!dataLine) continue
 
           try {
-            handleEvent(JSON.parse(dataLine.slice(6)))
+            applyEvent(JSON.parse(dataLine.slice(6)))
           } catch {
             addLog('log', dataLine.slice(6))
           }
@@ -266,20 +383,111 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
 
         if (done) break
       }
+
+      if (currentRunIdRef.current === targetRunId && statusRef.current !== 'done' && statusRef.current !== 'error') {
+        scheduleReconnect(targetRunId)
+      }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        setStatus('idle')
-        addLog('status', 'Run stopped by user.')
         return
       }
 
+      if (currentRunIdRef.current === targetRunId) {
+        scheduleReconnect(targetRunId)
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!viewer.user) {
+      resetRunView()
+      setStatus('idle')
+      return
+    }
+
+    let cancelled = false
+
+    const restoreActiveRun = async () => {
+      try {
+        const response = await fetch('/api/cfd')
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response))
+        }
+
+        const payload = await response.json() as { run: RunSummary | null }
+        if (!payload.run || cancelled) {
+          return
+        }
+
+        await hydrateRunRef.current(payload.run.id, true)
+      } catch {
+        // Ignore restore failures and keep the page interactive.
+      }
+    }
+
+    void restoreActiveRun()
+
+    return () => {
+      cancelled = true
+      stopStreaming()
+    }
+  }, [readErrorMessage, resetRunView, stopStreaming, viewer.user])
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!prompt.trim() || status === 'running' || !viewer.user || remainingRuns <= 0) {
+      return
+    }
+
+    stopStreaming()
+    resetRunView()
+    setStatus('running')
+
+    try {
+      const response = await fetch('/api/cfd', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response))
+      }
+
+      const payload = await response.json() as {
+        runId: string
+        remainingRuns: number
+      }
+
+      setRemainingRuns(payload.remainingRuns)
+      await hydrateRunRef.current(payload.runId, false)
+    } catch (error) {
+      currentRunIdRef.current = null
+      setRunId(null)
       addLog('error', (error as Error).message)
       setStatus('error')
     }
   }
 
-  const handleStop = () => {
-    abortRef.current?.abort()
+  const handleStop = async () => {
+    if (!runId) {
+      return
+    }
+
+    try {
+      addLog('status', 'Stopping run...')
+      const response = await fetch(`/api/cfd/${encodeURIComponent(runId)}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response))
+      }
+    } catch (error) {
+      addLog('error', (error as Error).message)
+    }
   }
 
   const isRunning = status === 'running'

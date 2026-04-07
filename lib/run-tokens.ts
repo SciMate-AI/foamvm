@@ -146,6 +146,7 @@ export async function updateRunConsumption(params: {
   consumptionId: string
   status: 'starting' | 'running' | 'completed' | 'failed'
   sandboxSessionId?: string | null
+  commandPid?: number | null
   errorMessage?: string | null
 }): Promise<void> {
   const admin = createAdminSupabaseClient()
@@ -154,6 +155,7 @@ export async function updateRunConsumption(params: {
     .update({
       status: params.status,
       sandbox_session_id: params.sandboxSessionId ?? null,
+      command_pid: params.commandPid ?? null,
       error_message: params.errorMessage ?? null,
     })
     .eq('id', params.consumptionId)

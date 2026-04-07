@@ -45,11 +45,17 @@ function inferContentType(filename: string): string {
 
 const activeSandboxes = new Map<string, Sandbox>()
 
+function sandboxApiOpts() {
+  return {
+    apiKey: process.env.E2B_API_KEY,
+  }
+}
+
 export async function createCFDSandbox(): Promise<{ sandbox: Sandbox; sessionId: string }> {
   const templateId = process.env.E2B_TEMPLATE_ID || 'base'
 
   const sandbox = await Sandbox.create(templateId, {
-    apiKey: process.env.E2B_API_KEY,
+    ...sandboxApiOpts(),
     timeoutMs: 30 * 60 * 1000,
     envs: {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
@@ -68,6 +74,17 @@ export async function createCFDSandbox(): Promise<{ sandbox: Sandbox; sessionId:
   return { sandbox, sessionId }
 }
 
+export async function connectCFDSandbox(sessionId: string): Promise<Sandbox> {
+  const existing = activeSandboxes.get(sessionId)
+  if (existing) {
+    return existing
+  }
+
+  const sandbox = await Sandbox.connect(sessionId, sandboxApiOpts())
+  activeSandboxes.set(sessionId, sandbox)
+  return sandbox
+}
+
 export async function killSandbox(sessionId: string) {
   const sandbox = activeSandboxes.get(sessionId)
   if (sandbox) {
@@ -77,6 +94,13 @@ export async function killSandbox(sessionId: string) {
       // Ignore cleanup errors.
     }
     activeSandboxes.delete(sessionId)
+    return
+  }
+
+  try {
+    await Sandbox.kill(sessionId, sandboxApiOpts())
+  } catch {
+    // Ignore cleanup errors.
   }
 }
 

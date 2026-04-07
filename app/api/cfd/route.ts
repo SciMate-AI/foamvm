@@ -1,14 +1,13 @@
-import { NextRequest } from 'next/server'
 import { CommandExitError } from 'e2b'
-import { createCFDSandbox, collectOutputFiles, getImageAsBase64, killSandbox } from '@/lib/sandbox'
 import type { Sandbox } from 'e2b'
+import { NextRequest, NextResponse } from 'next/server'
 
+import { getAuthenticatedUser } from '@/lib/auth'
+import { collectOutputFiles, createCFDSandbox, killSandbox } from '@/lib/sandbox'
+import { consumeRunTokenForUser, toDataUrl, updateRunConsumption, uploadRunOutputs } from '@/lib/run-tokens'
+
+export const runtime = 'nodejs'
 export const maxDuration = 1800
-
-// ─── Keepalive + reconnect wrapper ────────────────────────────────────────────
-// Runs a long command with:
-//  • sandbox.setTimeout() every 4 min to prevent sandbox expiry
-//  • auto-reconnect on connection drop (e2b "terminated" / disconnect errors)
 
 async function runWithKeepalive(
   sandbox: Sandbox,
@@ -18,27 +17,28 @@ async function runWithKeepalive(
     envs?: Record<string, string>
   },
   onStdout: (data: string) => void,
-  onStderr:  (data: string) => void,
+  onStderr: (data: string) => void,
 ): Promise<void> {
-  const KEEPALIVE_MS  = 4 * 60 * 1000   // refresh sandbox every 4 min
-  const MAX_RECONNECT = 8                // max reconnect attempts
-  const RECONNECT_DELAY_MS = 2000
+  const keepaliveMs = 4 * 60 * 1000
+  const reconnectDelayMs = 2000
+  const maxReconnect = 8
 
-  // Start command in background — returns handle immediately with pid
   const handle = await sandbox.commands.run(cmd, {
     ...opts,
     background: true,
-    timeoutMs: 0,   // disable SDK-level timeout; sandbox lifetime controls max duration
+    timeoutMs: 0,
     onStdout,
     onStderr,
   } as Parameters<typeof sandbox.commands.run>[1] & { background: true })
 
   const pid = handle.pid
-
-  // Keepalive: periodically extend sandbox lifetime
   const keepalive = setInterval(async () => {
-    try { await sandbox.setTimeout(30 * 60 * 1000) } catch { /* ignore */ }
-  }, KEEPALIVE_MS)
+    try {
+      await sandbox.setTimeout(30 * 60 * 1000)
+    } catch {
+      // Ignore keepalive failures.
+    }
+  }, keepaliveMs)
 
   try {
     let currentHandle = handle
@@ -47,27 +47,26 @@ async function runWithKeepalive(
     while (true) {
       try {
         await currentHandle.wait()
-        return  // finished normally
-      } catch (err) {
-        if (!(err instanceof CommandExitError)) throw err
-
-        const isConnDrop =
-          err.message?.includes('terminated') ||
-          err.message?.includes('disconnect') ||
-          err.message?.includes('unknown')
-
-        if (!isConnDrop || attempts >= MAX_RECONNECT) {
-          // Real exit or too many retries
-          if (err.stderr?.trim()) onStderr(err.stderr.slice(-500))
-          if (!isConnDrop) throw err
-          return  // connection kept dropping — return with whatever output we got
+        return
+      } catch (error) {
+        if (!(error instanceof CommandExitError)) {
+          throw error
         }
 
-        attempts++
-        onStderr(`[reconnect attempt ${attempts}/${MAX_RECONNECT}]`)
-        await new Promise(r => setTimeout(r, RECONNECT_DELAY_MS))
+        const isConnectionDrop =
+          error.message?.includes('terminated') ||
+          error.message?.includes('disconnect') ||
+          error.message?.includes('unknown')
 
-        // Reconnect to the same running process by PID
+        if (!isConnectionDrop || attempts >= maxReconnect) {
+          if (error.stderr?.trim()) onStderr(error.stderr.slice(-500))
+          if (!isConnectionDrop) throw error
+          return
+        }
+
+        attempts += 1
+        onStderr(`[reconnect attempt ${attempts}/${maxReconnect}]`)
+        await new Promise((resolve) => setTimeout(resolve, reconnectDelayMs))
         currentHandle = await sandbox.commands.connect(pid, { onStdout, onStderr, timeoutMs: 0 })
       }
     }
@@ -76,14 +75,32 @@ async function runWithKeepalive(
   }
 }
 
-// ─── API route ─────────────────────────────────────────────────────────────────
+function buildPromptExcerpt(prompt: string): string {
+  const cleaned = prompt.replace(/\s+/g, ' ').trim()
+  return cleaned.slice(0, 280)
+}
 
 export async function POST(request: NextRequest) {
-  const { prompt } = await request.json()
-
-  if (!prompt?.trim()) {
-    return new Response('Missing prompt', { status: 400 })
+  const user = await getAuthenticatedUser()
+  if (!user) {
+    return NextResponse.json({ error: 'You must sign in before running CFD jobs.' }, { status: 401 })
   }
+
+  const { prompt } = await request.json()
+  if (!prompt?.trim()) {
+    return NextResponse.json({ error: 'Missing prompt' }, { status: 400 })
+  }
+
+  const consumeResult = await consumeRunTokenForUser({
+    userId: user.id,
+    promptExcerpt: buildPromptExcerpt(prompt),
+  })
+
+  if (!consumeResult.success || !consumeResult.consumptionId) {
+    return NextResponse.json({ error: consumeResult.message }, { status: 403 })
+  }
+
+  const consumptionId = consumeResult.consumptionId
 
   const encoder = new TextEncoder()
 
@@ -92,34 +109,39 @@ export async function POST(request: NextRequest) {
       const send = (event: object) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
-        } catch (_) {}
+        } catch {
+          // Ignore enqueue errors after the stream closes.
+        }
       }
 
       let sessionId = ''
 
       try {
+        send({ type: 'credit', remainingRuns: consumeResult.remainingRuns })
         send({ type: 'status', message: 'Creating sandbox...' })
 
-        const { sandbox, sessionId: sid } = await createCFDSandbox()
-        sessionId = sid
-        send({ type: 'session', sessionId })
+        const { sandbox, sessionId: createdSessionId } = await createCFDSandbox()
+        sessionId = createdSessionId
 
-        // Verify environment
+        await updateRunConsumption({
+          consumptionId,
+          status: 'running',
+          sandboxSessionId: sessionId,
+        })
+
+        send({ type: 'session', sessionId })
         send({ type: 'status', message: 'Verifying sandbox environment...' })
-        const check = await sandbox.commands.run(
-          'which claude && claude --version && node --version',
-          { timeoutMs: 30000 }
-        )
+
+        const check = await sandbox.commands.run('which claude && claude --version && node --version', {
+          timeoutMs: 30000,
+        })
         send({ type: 'log', text: `[env] ${check.stdout.trim()}` })
 
-        // Verify skills
         const skills = await sandbox.commands.run(
           'ls /workspace/.claude/skills/hpc-openfoam/SKILL.md 2>/dev/null && echo ok || echo missing',
-          { timeoutMs: 10000 }
+          { timeoutMs: 10000 },
         )
         send({ type: 'log', text: `[skills] ${skills.stdout.trim()}` })
-
-        // Launch Claude Code with keepalive + reconnect
         send({ type: 'status', message: 'Launching Claude Code...' })
 
         const escapedPrompt = prompt.replace(/'/g, `'"'"'`)
@@ -131,7 +153,7 @@ export async function POST(request: NextRequest) {
           {
             cwd: '/workspace',
             envs: {
-              ANTHROPIC_API_KEY:  process.env.ANTHROPIC_API_KEY  || '',
+              ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
               ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || '',
             },
           },
@@ -151,30 +173,59 @@ export async function POST(request: NextRequest) {
           },
         )
 
-        // Collect output files
         send({ type: 'status', message: 'Collecting output files...' })
-        const files = await collectOutputFiles(sandbox, sessionId)
+        const outputFiles = await collectOutputFiles(sandbox)
+        const uploadedFiles = await uploadRunOutputs({
+          userId: user.id,
+          consumptionId,
+          files: outputFiles,
+        })
 
-        for (const f of files) {
-          if (f.isImage) {
-            const dataUrl = getImageAsBase64(sessionId, f.name)
-            if (dataUrl) send({ type: 'image', name: f.name, dataUrl })
-          } else {
-            send({
-              type: 'file',
-              name: f.name,
-              url: `/api/files?session=${sessionId}&file=${encodeURIComponent(f.name)}`,
-              size: f.size,
-            })
+        for (const file of outputFiles) {
+          const uploaded = uploadedFiles.get(file.name)
+          if (!uploaded) continue
+
+          if (file.isImage) {
+            const dataUrl = toDataUrl(file)
+            if (dataUrl) {
+              send({
+                type: 'image',
+                name: file.name,
+                dataUrl,
+              })
+            }
           }
+
+          send({
+            type: 'file',
+            name: file.name,
+            url: uploaded.url,
+            size: file.size,
+          })
         }
 
-        send({ type: 'done', sessionId })
+        await updateRunConsumption({
+          consumptionId,
+          status: 'completed',
+          sandboxSessionId: sessionId,
+        })
 
-      } catch (err) {
-        send({ type: 'error', message: err instanceof Error ? err.message : String(err) })
+        send({ type: 'done', sessionId })
+      } catch (error) {
+        await updateRunConsumption({
+          consumptionId,
+          status: 'failed',
+          sandboxSessionId: sessionId || null,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        }).catch(() => {})
+
+        send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
       } finally {
-        if (sessionId) setTimeout(() => killSandbox(sessionId), 10 * 60 * 1000)
+        if (sessionId) {
+          setTimeout(() => {
+            void killSandbox(sessionId)
+          }, 10 * 60 * 1000)
+        }
         controller.close()
       }
     },

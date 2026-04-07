@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SciMate
 
-## Getting Started
+SciMate is a Next.js 16 app for running CFD jobs through E2B sandboxes, gated by Supabase authentication and one-time run tokens.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Next.js 16 App Router
+- Supabase Auth + Postgres + Storage
+- E2B sandboxes for long-running CFD execution
+- Vercel for deployment
+
+## Local setup
+
+1. Copy `.env.example` to `.env.local`.
+2. Fill in the Supabase, E2B, and Anthropic environment variables.
+3. In Supabase SQL Editor, run [`supabase/schema.sql`](./supabase/schema.sql).
+4. Mark at least one user as admin:
+
+```sql
+update public.profiles
+set role = 'admin'
+where email = 'you@example.com';
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+5. Install dependencies and start development:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Run-token flow
 
-## Learn More
+- Users sign in with Supabase email magic links.
+- Admins generate random run tokens from `/admin/tokens`.
+- A user redeems a token on `/redeem`.
+- Each call to `/api/cfd` consumes exactly one redeemed token before starting the sandbox.
+- Output files are persisted to Supabase Storage and downloaded through the protected `/api/files` route.
 
-To learn more about Next.js, take a look at the following resources:
+## Vercel deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Create a Vercel project from this repository.
+2. Connect the same Supabase project you used locally.
+3. Add all variables from `.env.example` to Vercel Project Settings.
+4. Run the SQL in [`supabase/schema.sql`](./supabase/schema.sql) on production.
+5. In Supabase Auth settings, set the site URL and redirect URL to:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```text
+https://your-domain.com/auth/confirm
+```
 
-## Deploy on Vercel
+## Important note
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The existing `.env.local` in this workspace currently contains real secrets. Move them into Vercel environment variables and rotate them before publishing the project.

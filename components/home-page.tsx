@@ -1,0 +1,525 @@
+'use client'
+
+import Link from 'next/link'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+import type { ViewerContext } from '@/lib/auth'
+
+type RunStatus = 'idle' | 'running' | 'done' | 'error'
+
+interface LogEntry {
+  id: number
+  kind: 'status' | 'assistant' | 'tool_use' | 'tool_result' | 'log' | 'stderr' | 'error'
+  text: string
+  detail?: string
+}
+
+interface ImageResult {
+  name: string
+  dataUrl: string
+}
+
+interface FileResult {
+  name: string
+  url: string
+  size: number
+}
+
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function extractClaudeEvent(payload: Record<string, unknown>): { kind: LogEntry['kind']; text: string; detail?: string } | null {
+  const type = payload.type as string
+  if (type === 'assistant') {
+    const msg = payload.message as { content?: { type: string; text?: string }[] } | undefined
+    const content = msg?.content ?? []
+    const texts = content.filter((item) => item.type === 'text').map((item) => item.text ?? '').join('')
+    if (!texts) return null
+    return { kind: 'assistant', text: texts }
+  }
+  if (type === 'tool_use') {
+    const toolPayload = payload as { name?: string; input?: unknown }
+    return {
+      kind: 'tool_use',
+      text: `[${toolPayload.name ?? 'tool'}]`,
+      detail: typeof toolPayload.input === 'string' ? toolPayload.input : JSON.stringify(toolPayload.input, null, 2),
+    }
+  }
+  if (type === 'tool_result') {
+    const content = (payload as { content?: unknown }).content
+    const text = typeof content === 'string' ? content : JSON.stringify(content)
+    return {
+      kind: 'tool_result',
+      text: text.slice(0, 500) + (text.length > 500 ? '...' : ''),
+    }
+  }
+  if (type === 'result') {
+    const result = (payload as { result?: string }).result ?? ''
+    if (!result) return null
+    return { kind: 'assistant', text: result }
+  }
+  return null
+}
+
+function LogLine({ entry }: { entry: LogEntry }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const colors: Record<LogEntry['kind'], string> = {
+    status: 'text-sky-300',
+    assistant: 'text-emerald-300',
+    tool_use: 'text-amber-300',
+    tool_result: 'text-slate-400',
+    log: 'text-slate-500',
+    stderr: 'text-orange-300',
+    error: 'text-rose-300',
+  }
+
+  return (
+    <div className={`log-entry rounded-2xl border border-white/5 bg-white/[0.02] px-3 py-2 font-mono text-xs leading-relaxed ${colors[entry.kind]}`}>
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 text-[10px] uppercase tracking-[0.2em] text-white/30">{entry.kind}</span>
+        <span className="whitespace-pre-wrap break-words">{entry.text}</span>
+      </div>
+      {entry.detail ? (
+        <div className="mt-2">
+          <button
+            onClick={() => setExpanded((value) => !value)}
+            className="text-[11px] text-white/40 underline transition hover:text-white/70"
+            type="button"
+          >
+            {expanded ? 'Hide detail' : 'Expand detail'}
+          </button>
+          {expanded ? (
+            <pre className="mt-2 overflow-x-auto rounded-xl border border-white/5 bg-black/30 p-3 text-[11px] text-slate-300">
+              {entry.detail}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ImageCard({ image }: { image: ImageResult }) {
+  const [zoomed, setZoomed] = useState(false)
+
+  return (
+    <>
+      <button
+        className="group relative overflow-hidden rounded-3xl border border-white/10 bg-black/40 text-left transition hover:border-cyan-300/40"
+        onClick={() => setZoomed(true)}
+        type="button"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img alt={image.name} className="max-h-72 w-full object-contain bg-slate-950/70" src={image.dataUrl} />
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 to-transparent px-4 py-3 text-xs text-slate-200">
+          {image.name}
+        </div>
+      </button>
+      {zoomed ? (
+        <button
+          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-slate-950/95 p-8"
+          onClick={() => setZoomed(false)}
+          type="button"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt={image.name} className="max-h-full max-w-full rounded-3xl object-contain shadow-2xl" src={image.dataUrl} />
+        </button>
+      ) : null}
+    </>
+  )
+}
+
+const EXAMPLE_PROMPTS = [
+  'Run a 2D lid-driven cavity flow at Re=1000 and generate a velocity magnitude contour.',
+  'Simulate flow over a backward-facing step at Re=100 with streamline plots and pressure drop.',
+  'Create a simple pipe-flow mesh with blockMesh, run icoFoam, and export the key result files.',
+]
+
+export function HomePage({ viewer }: { viewer: ViewerContext }) {
+  const [prompt, setPrompt] = useState('')
+  const [status, setStatus] = useState<RunStatus>('idle')
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [images, setImages] = useState<ImageResult[]>([])
+  const [files, setFiles] = useState<FileResult[]>([])
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [remainingRuns, setRemainingRuns] = useState(viewer.availableRuns)
+  const logCounter = useRef(0)
+  const logEndRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const addLog = useCallback((kind: LogEntry['kind'], text: string, detail?: string) => {
+    setLogs((previous) => [...previous, { id: logCounter.current++, kind, text, detail }])
+  }, [])
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs])
+
+  const handleEvent = useCallback((event: Record<string, unknown>) => {
+    const type = event.type as string
+    switch (type) {
+      case 'status':
+        addLog('status', event.message as string)
+        break
+      case 'session':
+        setSessionId(event.sessionId as string)
+        break
+      case 'credit':
+        setRemainingRuns(Number(event.remainingRuns) || 0)
+        break
+      case 'claude': {
+        const result = extractClaudeEvent(event.payload as Record<string, unknown>)
+        if (result) addLog(result.kind, result.text, result.detail)
+        break
+      }
+      case 'log':
+        addLog('log', event.text as string)
+        break
+      case 'stderr':
+        if ((event.text as string)?.trim()) addLog('stderr', event.text as string)
+        break
+      case 'image':
+        setImages((previous) => [...previous, { name: event.name as string, dataUrl: event.dataUrl as string }])
+        break
+      case 'file':
+        setFiles((previous) => [...previous, { name: event.name as string, url: event.url as string, size: event.size as number }])
+        break
+      case 'error':
+        addLog('error', event.message as string)
+        setStatus('error')
+        break
+      case 'done':
+        setStatus('done')
+        break
+    }
+  }, [addLog])
+
+  async function readErrorMessage(response: Response): Promise<string> {
+    try {
+      const payload = await response.json()
+      if (typeof payload.error === 'string') {
+        return payload.error
+      }
+    } catch {
+      const text = await response.text().catch(() => '')
+      if (text) return text
+    }
+
+    return `Request failed with status ${response.status}`
+  }
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!prompt.trim() || status === 'running' || !viewer.user || remainingRuns <= 0) {
+      return
+    }
+
+    setStatus('running')
+    setLogs([])
+    setImages([])
+    setFiles([])
+    setSessionId(null)
+
+    abortRef.current = new AbortController()
+
+    try {
+      const response = await fetch('/api/cfd', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt }),
+        signal: abortRef.current.signal,
+      })
+
+      if (!response.ok || !response.body) {
+        throw new Error(await readErrorMessage(response))
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done })
+        }
+
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+
+        for (const part of parts) {
+          const dataLine = part.split('\n').find((line) => line.startsWith('data: '))
+          if (!dataLine) continue
+
+          try {
+            handleEvent(JSON.parse(dataLine.slice(6)))
+          } catch {
+            addLog('log', dataLine.slice(6))
+          }
+        }
+
+        if (done) break
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        setStatus('idle')
+        addLog('status', 'Run stopped by user.')
+        return
+      }
+
+      addLog('error', (error as Error).message)
+      setStatus('error')
+    }
+  }
+
+  const handleStop = () => {
+    abortRef.current?.abort()
+  }
+
+  const isRunning = status === 'running'
+  const hasResults = images.length > 0 || files.length > 0
+  const canRun = Boolean(viewer.user) && remainingRuns > 0 && !isRunning
+
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(251,191,36,0.12),_transparent_22%),linear-gradient(180deg,_#020617_0%,_#0f172a_44%,_#020617_100%)] text-slate-100">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-8 pt-6 sm:px-6 lg:px-8">
+        <header className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.03] px-5 py-4 shadow-2xl shadow-cyan-950/20 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-500/20">
+              <span className="text-sm font-semibold tracking-[0.3em]">SM</span>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-[0.32em] text-cyan-200/70">Vercel-ready gated runtime</div>
+              <h1 className="text-2xl font-semibold tracking-tight text-white">SciMate CFD on Demand</h1>
+            </div>
+            <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
+              {viewer.user ? (
+                <>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-100">
+                    {viewer.user.email}
+                  </span>
+                  <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-cyan-50">
+                    {remainingRuns} run{remainingRuns === 1 ? '' : 's'} ready
+                  </span>
+                  <Link className="rounded-full border border-white/10 px-3 py-1 text-slate-200 transition hover:border-white/30 hover:text-white" href="/redeem">
+                    Redeem token
+                  </Link>
+                  <Link className="rounded-full border border-white/10 px-3 py-1 text-slate-200 transition hover:border-white/30 hover:text-white" href="/account">
+                    Account
+                  </Link>
+                  {viewer.isAdmin ? (
+                    <Link className="rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-amber-100 transition hover:border-amber-200/50" href="/admin/tokens">
+                      Admin
+                    </Link>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-slate-300">
+                    Explore first, unlock when invited
+                  </span>
+                  <Link className="rounded-full bg-cyan-300 px-4 py-1.5 font-medium text-slate-950 transition hover:bg-cyan-200" href="/auth/login">
+                    Sign in
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <section className="mb-6 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
+          <div className="rounded-[30px] border border-white/10 bg-white/[0.03] p-6 backdrop-blur">
+            <div className="mb-5 max-w-3xl">
+              <p className="text-sm uppercase tracking-[0.32em] text-cyan-200/70">Invite-gated compute</p>
+              <h2 className="mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+                Publish the app on Vercel, but keep every run under your control.
+              </h2>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
+                Visitors can browse the product and sample prompts. Actual CFD execution requires a signed-in account plus
+                a redeemed one-time run token that you generated yourself.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 text-sm">
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
+                One token = one real run
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
+                Email magic-link login
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
+                Admin-generated random codes
+              </div>
+            </div>
+          </div>
+          <div className="rounded-[30px] border border-cyan-300/10 bg-slate-950/40 p-6">
+            <div className="text-xs uppercase tracking-[0.32em] text-cyan-200/70">Access state</div>
+            {viewer.user ? (
+              <div className="mt-4 space-y-3 text-sm text-slate-200">
+                <p>You are signed in and can redeem additional run tokens at any time.</p>
+                <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                  Remaining run credits: <span className="font-semibold text-white">{remainingRuns}</span>
+                </p>
+                <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                  Completed or consumed runs so far: <span className="font-semibold text-white">{viewer.consumedRuns}</span>
+                </p>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <p>Without login, you can inspect the interface and sample workloads but not start sandbox execution.</p>
+                <p>After login, you still need at least one redeemed run token before the Run button unlocks.</p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="grid flex-1 gap-6 lg:grid-cols-2">
+          <section className="flex min-h-[640px] flex-col overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.03] backdrop-blur">
+            <div className="border-b border-white/10 px-5 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.32em] text-slate-400">Prompt + live trace</div>
+                  <h3 className="mt-1 text-lg font-medium text-white">Execution console</h3>
+                </div>
+                {sessionId ? (
+                  <div className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">
+                    Session {sessionId.slice(0, 12)}...
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="border-b border-white/10 px-5 py-5">
+              <form className="space-y-4" onSubmit={handleSubmit}>
+                <textarea
+                  className="h-36 w-full resize-none rounded-[24px] border border-white/10 bg-slate-950/70 px-4 py-4 font-mono text-sm text-slate-50 outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60"
+                  disabled={isRunning}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Describe your CFD task in plain English..."
+                  rows={5}
+                  value={prompt}
+                />
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {isRunning ? (
+                    <button
+                      className="rounded-full border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-medium text-rose-100 transition hover:border-rose-200/50"
+                      onClick={handleStop}
+                      type="button"
+                    >
+                      Stop current run
+                    </button>
+                  ) : viewer.user ? (
+                    canRun ? (
+                      <button className="rounded-full bg-cyan-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200" type="submit">
+                        Run CFD
+                      </button>
+                    ) : (
+                      <Link className="rounded-full bg-amber-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200" href="/redeem">
+                        Redeem a run token first
+                      </Link>
+                    )
+                  ) : (
+                    <Link className="rounded-full bg-cyan-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200" href="/auth/login">
+                      Sign in to unlock runs
+                    </Link>
+                  )}
+                  <span className="text-xs uppercase tracking-[0.24em] text-slate-500">Ctrl/Cmd + Enter</span>
+                </div>
+              </form>
+
+              {!isRunning && logs.length === 0 ? (
+                <div className="mt-4 space-y-2">
+                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Example prompts</div>
+                  {EXAMPLE_PROMPTS.map((example) => (
+                    <button
+                      className="block w-full rounded-2xl border border-white/5 bg-black/20 px-4 py-3 text-left text-sm text-slate-300 transition hover:border-white/20 hover:text-white"
+                      key={example}
+                      onClick={() => setPrompt(example)}
+                      type="button"
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex-1 space-y-2 overflow-y-auto px-5 py-5">
+              {logs.length === 0 ? (
+                <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-black/10 px-6 text-center text-sm text-slate-500">
+                  Runtime messages, tool traces, stderr, and assistant updates will stream here.
+                </div>
+              ) : null}
+              {logs.map((entry) => (
+                <LogLine entry={entry} key={entry.id} />
+              ))}
+              <div ref={logEndRef} />
+            </div>
+          </section>
+
+          <section className="flex min-h-[640px] flex-col overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.03] backdrop-blur">
+            <div className="border-b border-white/10 px-5 py-4">
+              <div className="text-xs uppercase tracking-[0.32em] text-slate-400">Output</div>
+              <h3 className="mt-1 text-lg font-medium text-white">Results and downloadable artifacts</h3>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-5">
+              {!hasResults && !isRunning ? (
+                <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-black/10 px-6 text-center text-sm text-slate-500">
+                  Result images and generated files appear here after a successful run.
+                </div>
+              ) : null}
+
+              {isRunning && !hasResults ? (
+                <div className="rounded-3xl border border-cyan-300/10 bg-cyan-300/5 px-4 py-3 text-sm text-cyan-50">
+                  Run token consumed. Waiting for streamed solver output and generated artifacts...
+                </div>
+              ) : null}
+
+              {images.length > 0 ? (
+                <section className="mb-6">
+                  <div className="mb-3 text-xs uppercase tracking-[0.32em] text-slate-400">Visualizations</div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {images.map((image) => (
+                      <ImageCard image={image} key={image.name} />
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {files.length > 0 ? (
+                <section>
+                  <div className="mb-3 text-xs uppercase tracking-[0.32em] text-slate-400">Files</div>
+                  <div className="space-y-2">
+                    {files.map((file) => (
+                      <a
+                        className="flex items-center gap-3 rounded-3xl border border-white/8 bg-black/20 px-4 py-3 transition hover:border-cyan-300/30 hover:bg-black/30"
+                        download={file.name}
+                        href={file.url}
+                        key={file.name}
+                      >
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/5 text-xs uppercase tracking-[0.28em] text-slate-300">
+                          file
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-white">{file.name}</div>
+                          <div className="text-xs text-slate-500">{humanSize(file.size)}</div>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}

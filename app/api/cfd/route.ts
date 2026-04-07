@@ -7,7 +7,7 @@ import { collectOutputFiles, createCFDSandbox, killSandbox } from '@/lib/sandbox
 import { consumeRunTokenForUser, toDataUrl, updateRunConsumption, uploadRunOutputs } from '@/lib/run-tokens'
 
 export const runtime = 'nodejs'
-export const maxDuration = 1800
+export const maxDuration = 800
 
 async function runWithKeepalive(
   sandbox: Sandbox,

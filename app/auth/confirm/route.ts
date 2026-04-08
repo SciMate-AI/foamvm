@@ -5,9 +5,20 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/env'
 
 export const runtime = 'nodejs'
 
+const CALLBACK_TYPES = ['email', 'recovery', 'invite', 'email_change', 'magiclink'] as const
+type CallbackType = (typeof CALLBACK_TYPES)[number]
+
+function normalizeNextPath(value: string | null): string {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) {
+    return '/'
+  }
+
+  return value
+}
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
-  const nextPath = url.searchParams.get('next') || '/'
+  const nextPath = normalizeNextPath(url.searchParams.get('next'))
   const code = url.searchParams.get('code')
   const tokenHash = url.searchParams.get('token_hash')
   const type = url.searchParams.get('type')
@@ -36,10 +47,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (tokenHash && type) {
+  if (tokenHash && type && CALLBACK_TYPES.includes(type as CallbackType)) {
     const { error } = await supabase.auth.verifyOtp({
       token_hash: tokenHash,
-      type: type as 'email' | 'recovery' | 'invite' | 'email_change',
+      type: type as CallbackType,
     })
 
     if (!error) {

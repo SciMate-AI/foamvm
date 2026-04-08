@@ -31,7 +31,7 @@ npm run dev
 
 ## Run-token flow
 
-- Users sign in with Supabase email magic links.
+- Users sign in with Supabase passwordless email codes. This avoids the browser confusion that magic links can cause.
 - Admins generate random run tokens from `/admin/tokens`.
 - A user redeems a token on `/redeem`.
 - Each call to `/api/cfd` consumes exactly one redeemed token before starting the sandbox.
@@ -48,6 +48,8 @@ npm run dev
 ```text
 https://your-domain.com/auth/confirm
 ```
+
+6. In the Supabase magic-link email template, include `{{ .Token }}` so users can complete login by typing the code into `/auth/login`.
 
 ## Important note
 

@@ -883,7 +883,7 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
                 One token = one real run
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
-                Email magic-link login
+                Email code login
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
                 Admin-generated random codes

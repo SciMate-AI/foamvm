@@ -50,7 +50,7 @@ export function LoginForm() {
 
       setCodeSent(true)
       setCode('')
-      setMessage('We sent a 6-digit sign-in code to your email. Enter it below to continue.')
+      setMessage('We sent a sign-in code to your email. Enter it below to continue.')
     })
   }
 
@@ -89,8 +89,8 @@ export function LoginForm() {
         <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Passwordless email sign-in</div>
         <h2 className="mt-2 text-3xl font-semibold text-white">Sign in to unlock invited runs</h2>
         <p className="mt-3 text-sm leading-6 text-slate-300">
-          Enter your email to receive a 6-digit sign-in code. First-time users are created automatically. The actual gate is
-          your run-token balance, not public signup.
+          Enter your email to receive a sign-in code. First-time users are created automatically. The actual gate is your
+          run-token balance, not public signup.
         </p>
       </div>
 
@@ -127,15 +127,13 @@ export function LoginForm() {
           </div>
 
           <label className="block">
-            <span className="mb-2 block text-sm text-slate-300">One-time code</span>
+            <span className="mb-2 block text-sm text-slate-300">Code from email</span>
             <input
               autoComplete="one-time-code"
               className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60"
-              inputMode="numeric"
-              maxLength={6}
+              inputMode="text"
               onChange={(event) => setCode(event.target.value)}
-              pattern="[0-9]{6}"
-              placeholder="123456"
+              placeholder="Enter the code exactly as shown"
               required
               type="text"
               value={code}
@@ -154,14 +152,14 @@ export function LoginForm() {
 
       {callbackError === 'invalid_callback' ? (
         <p className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
-          That sign-in link is invalid or expired. Request a fresh email and use the 6-digit code instead.
+          That sign-in link is invalid or expired. Request a fresh email and use the code from the email instead.
         </p>
       ) : null}
       {error ? <p className="mt-4 rounded-2xl border border-rose-300/20 bg-rose-300/10 px-4 py-3 text-sm text-rose-100">{error}</p> : null}
       {message ? <p className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 px-4 py-3 text-sm text-emerald-100">{message}</p> : null}
 
       <div className="mt-6 text-sm leading-6 text-slate-400">
-        Use the 6-digit code from the email to finish sign-in. This avoids the cross-browser confusion of magic links.
+        Use the code from the email to finish sign-in. This avoids the cross-browser confusion of magic links.
       </div>
 
       <div className="mt-4 text-sm text-slate-400">

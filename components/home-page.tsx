@@ -472,9 +472,9 @@ function ImageCard({ image }: { image: ImageResult }) {
 }
 
 const EXAMPLE_PROMPTS = [
-  'Run a 2D lid-driven cavity flow at Re=1000 and generate a velocity magnitude contour.',
-  'Simulate flow over a backward-facing step at Re=100 with streamline plots and pressure drop.',
-  'Create a simple pipe-flow mesh with blockMesh, run icoFoam, and export the key result files.',
+  '运行 2D lid-driven cavity，Re=1000，并生成速度云图 / Run a 2D lid-driven cavity at Re=1000 with velocity contours.',
+  '模拟 backward-facing step，Re=100，并输出流线和压降 / Simulate a backward-facing step at Re=100 with streamlines and pressure drop.',
+  '用 blockMesh 创建简单管流网格，运行 icoFoam，并导出关键结果文件 / Create a pipe-flow mesh with blockMesh, run icoFoam, and export result files.',
 ]
 
 export function HomePage({ viewer }: { viewer: ViewerContext }) {
@@ -825,11 +825,11 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
         <header className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.03] px-5 py-4 shadow-2xl shadow-cyan-950/20 backdrop-blur">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-500/20">
-              <span className="text-sm font-semibold tracking-[0.3em]">SM</span>
+              <span className="text-sm font-semibold tracking-[0.22em]">OS</span>
             </div>
             <div>
-              <div className="text-xs uppercase tracking-[0.32em] text-cyan-200/70">Vercel-ready gated runtime</div>
-              <h1 className="text-2xl font-semibold tracking-tight text-white">SciMate CFD on Demand</h1>
+              <div className="text-xs uppercase tracking-[0.32em] text-cyan-200/70">PhysicsOS Cloud / 物理仿真云</div>
+              <h1 className="text-2xl font-semibold tracking-tight text-white">Unified Simulation Runner Platform</h1>
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
               {viewer.user ? (
@@ -838,27 +838,27 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
                     {viewer.user.email}
                   </span>
                   <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-cyan-50">
-                    {remainingRuns} run{remainingRuns === 1 ? '' : 's'} ready
+                    {remainingRuns} 次运行额度 / runs ready
                   </span>
                   <Link className="rounded-full border border-white/10 px-3 py-1 text-slate-200 transition hover:border-white/30 hover:text-white" href="/redeem">
-                    Redeem token
+                    兑换邀请码 / Redeem
                   </Link>
                   <Link className="rounded-full border border-white/10 px-3 py-1 text-slate-200 transition hover:border-white/30 hover:text-white" href="/account">
-                    Account
+                    账号 / Account
                   </Link>
                   {viewer.isAdmin ? (
                     <Link className="rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-amber-100 transition hover:border-amber-200/50" href="/admin/tokens">
-                      Admin
+                      管理 / Admin
                     </Link>
                   ) : null}
                 </>
               ) : (
                 <>
                   <span className="rounded-full border border-white/10 px-3 py-1 text-slate-300">
-                    Explore first, unlock when invited
+                    可浏览，运行需邀请码 / Browse first, run by invite
                   </span>
                   <Link className="rounded-full bg-cyan-300 px-4 py-1.5 font-medium text-slate-950 transition hover:bg-cyan-200" href="/auth/login">
-                    Sign in
+                    登录 / Sign in
                   </Link>
                 </>
               )}
@@ -869,45 +869,69 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
         <section className="mb-6 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
           <div className="rounded-[30px] border border-white/10 bg-white/[0.03] p-6 backdrop-blur">
             <div className="mb-5 max-w-3xl">
-              <p className="text-sm uppercase tracking-[0.32em] text-cyan-200/70">Invite-gated compute</p>
+              <p className="text-sm uppercase tracking-[0.32em] text-cyan-200/70">Invite-gated physics compute / 邀请制物理计算</p>
               <h2 className="mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Publish the app on Vercel, but keep every run under your control.
+                PhysicsOS Cloud turns heavy solvers into controlled web and CLI services.
               </h2>
               <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
-                Visitors can browse the product and sample prompts. Actual CFD execution requires a signed-in account plus
-                a redeemed one-time run token that you generated yourself.
+                把 OpenFOAM/E2B、后续 SU2/Slurm/RunPod 等求解器放在云端统一管控；网页和 PhysicsOS CLI 共享账号、邀请码、额度和运行记录。
+                CFD/OpenFOAM 是当前第一个可运行板块，更多物理后端会按相同权限模型接入。
               </p>
             </div>
             <div className="flex flex-wrap gap-3 text-sm">
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
-                One token = one real run
+                一个邀请码 = 一次真实运行 / One token = one run
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
-                Email code login
+                邮箱验证码登录 / Email code login
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-slate-200">
-                Admin-generated random codes
+                CLI 设备码授权 / CLI device-code auth
               </div>
             </div>
           </div>
           <div className="rounded-[30px] border border-cyan-300/10 bg-slate-950/40 p-6">
-            <div className="text-xs uppercase tracking-[0.32em] text-cyan-200/70">Access state</div>
+            <div className="text-xs uppercase tracking-[0.32em] text-cyan-200/70">Access state / 权限状态</div>
             {viewer.user ? (
               <div className="mt-4 space-y-3 text-sm text-slate-200">
-                <p>You are signed in and can redeem additional run tokens at any time.</p>
+                <p>你已登录，可以继续兑换邀请码增加运行额度。You are signed in and can redeem more run credits.</p>
                 <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                  Remaining run credits: <span className="font-semibold text-white">{remainingRuns}</span>
+                  剩余运行额度 / Remaining credits: <span className="font-semibold text-white">{remainingRuns}</span>
                 </p>
                 <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                  Completed or consumed runs so far: <span className="font-semibold text-white">{viewer.consumedRuns}</span>
+                  已消耗运行 / Consumed runs: <span className="font-semibold text-white">{viewer.consumedRuns}</span>
                 </p>
               </div>
             ) : (
               <div className="mt-4 space-y-3 text-sm text-slate-300">
-                <p>Without login, you can inspect the interface and sample workloads but not start sandbox execution.</p>
-                <p>After login, you still need at least one redeemed run token before the Run button unlocks.</p>
+                <p>未登录时可以浏览平台和样例，但不能启动沙箱。Without login, you can browse but cannot start sandbox execution.</p>
+                <p>登录后仍需兑换至少一个邀请码，才能解锁真实求解器运行。A redeemed token is required before real solver runs.</p>
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="mb-6 grid gap-4 md:grid-cols-3">
+          <div className="rounded-[28px] border border-cyan-300/15 bg-cyan-300/[0.04] p-5">
+            <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">App 01 / 已上线</div>
+            <h3 className="mt-2 text-xl font-semibold text-white">CFD / OpenFOAM</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              自然语言 CFD、OpenFOAM 沙箱、日志流和结果文件下载。Natural-language CFD with OpenFOAM sandbox execution.
+            </p>
+          </div>
+          <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+            <div className="text-xs uppercase tracking-[0.28em] text-slate-400">App 02 / 规划中</div>
+            <h3 className="mt-2 text-xl font-semibold text-white">PhysicsOS CLI Runner</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              CLI 通过设备码登录，提交结构化 solver manifest。Device-code CLI login and structured solver job submission.
+            </p>
+          </div>
+          <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+            <div className="text-xs uppercase tracking-[0.28em] text-slate-400">App 03 / 规划中</div>
+            <h3 className="mt-2 text-xl font-semibold text-white">TAPS / Surrogate Validation</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              未来用于 TAPS、神经算子和 full solver 交叉验证。Future validation hub for TAPS, neural operators, and full solvers.
+            </p>
           </div>
         </section>
 
@@ -916,8 +940,8 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
             <div className="border-b border-white/10 px-5 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.32em] text-slate-400">Prompt + live trace</div>
-                  <h3 className="mt-1 text-lg font-medium text-white">Execution console</h3>
+                  <div className="text-xs uppercase tracking-[0.32em] text-slate-400">CFD/OpenFOAM app / 当前板块</div>
+                  <h3 className="mt-1 text-lg font-medium text-white">Execution console / 执行控制台</h3>
                 </div>
                 {sessionId ? (
                   <div className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">
@@ -933,7 +957,7 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
                   className="h-36 w-full resize-none rounded-[24px] border border-white/10 bg-slate-950/70 px-4 py-4 font-mono text-sm text-slate-50 outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60"
                   disabled={isRunning}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Describe your CFD task in plain English..."
+                  placeholder="用中文或英文描述 CFD 任务 / Describe your CFD task in Chinese or English..."
                   rows={5}
                   value={prompt}
                 />
@@ -945,21 +969,21 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
                       onClick={handleStop}
                       type="button"
                     >
-                      Stop current run
+                      停止当前运行 / Stop run
                     </button>
                   ) : viewer.user ? (
                     canRun ? (
                       <button className="rounded-full bg-cyan-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200" type="submit">
-                        Run CFD
+                        运行 CFD / Run CFD
                       </button>
                     ) : (
                       <Link className="rounded-full bg-amber-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-200" href="/redeem">
-                        Redeem a run token first
+                        先兑换邀请码 / Redeem first
                       </Link>
                     )
                   ) : (
                     <Link className="rounded-full bg-cyan-300 px-5 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200" href="/auth/login">
-                      Sign in to unlock runs
+                      登录后运行 / Sign in to run
                     </Link>
                   )}
                   <span className="text-xs uppercase tracking-[0.24em] text-slate-500">Ctrl/Cmd + Enter</span>
@@ -968,7 +992,7 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
 
               {!isRunning && logs.length === 0 ? (
                 <div className="mt-4 space-y-2">
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Example prompts</div>
+                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">样例提示 / Example prompts</div>
                   {EXAMPLE_PROMPTS.map((example) => (
                     <button
                       className="block w-full rounded-2xl border border-white/5 bg-black/20 px-4 py-3 text-left text-sm text-slate-300 transition hover:border-white/20 hover:text-white"
@@ -986,7 +1010,7 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
             <div className="flex-1 space-y-2 overflow-y-auto px-5 py-5">
               {logs.length === 0 ? (
                 <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-black/10 px-6 text-center text-sm text-slate-500">
-                  Runtime messages, tool traces, stderr, and assistant updates will stream here.
+                  运行日志、工具调用、stderr 和 agent 更新会在这里实时显示。Runtime logs, tool traces, stderr, and agent updates stream here.
                 </div>
               ) : null}
               {logs.map((entry) => (
@@ -998,26 +1022,26 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
 
           <section className="flex min-h-[640px] flex-col overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.03] backdrop-blur">
             <div className="border-b border-white/10 px-5 py-4">
-              <div className="text-xs uppercase tracking-[0.32em] text-slate-400">Output</div>
-              <h3 className="mt-1 text-lg font-medium text-white">Results and downloadable artifacts</h3>
+              <div className="text-xs uppercase tracking-[0.32em] text-slate-400">Output / 输出</div>
+              <h3 className="mt-1 text-lg font-medium text-white">Results and downloadable artifacts / 结果与文件</h3>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-5">
               {!hasResults && !isRunning ? (
                 <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-black/10 px-6 text-center text-sm text-slate-500">
-                  Result images and generated files appear here after a successful run.
+                  成功运行后，图片和生成文件会出现在这里。Result images and generated files appear here after a successful run.
                 </div>
               ) : null}
 
               {isRunning && !hasResults ? (
                 <div className="rounded-3xl border border-cyan-300/10 bg-cyan-300/5 px-4 py-3 text-sm text-cyan-50">
-                  Run token consumed. Waiting for streamed solver output and generated artifacts...
+                  已消耗一次运行额度，正在等待求解器输出和结果文件。Run token consumed; waiting for solver output and artifacts...
                 </div>
               ) : null}
 
               {images.length > 0 ? (
                 <section className="mb-6">
-                  <div className="mb-3 text-xs uppercase tracking-[0.32em] text-slate-400">Visualizations</div>
+                  <div className="mb-3 text-xs uppercase tracking-[0.32em] text-slate-400">可视化 / Visualizations</div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {images.map((image) => (
                       <ImageCard image={image} key={image.name} />
@@ -1028,7 +1052,7 @@ export function HomePage({ viewer }: { viewer: ViewerContext }) {
 
               {files.length > 0 ? (
                 <section>
-                  <div className="mb-3 text-xs uppercase tracking-[0.32em] text-slate-400">Files</div>
+                  <div className="mb-3 text-xs uppercase tracking-[0.32em] text-slate-400">文件 / Files</div>
                   <div className="space-y-2">
                     {files.map((file) => (
                       <a

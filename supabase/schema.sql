@@ -38,10 +38,96 @@ create table if not exists public.run_consumptions (
   user_id uuid not null references public.profiles (id) on delete cascade,
   run_token_id uuid not null references public.run_tokens (id) on delete restrict,
   prompt_excerpt text,
+  source text not null default 'web_prompt',
+  backend text,
+  solver text,
+  job_manifest jsonb,
+  estimated_cost_usd numeric,
+  runtime_seconds integer,
+  output_bytes bigint,
   sandbox_session_id text,
   command_pid bigint,
   status text not null default 'starting' check (status in ('starting', 'running', 'completed', 'failed')),
   error_message text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.run_consumptions
+add column if not exists source text not null default 'web_prompt',
+add column if not exists backend text,
+add column if not exists solver text,
+add column if not exists job_manifest jsonb,
+add column if not exists estimated_cost_usd numeric,
+add column if not exists runtime_seconds integer,
+add column if not exists output_bytes bigint;
+
+create table if not exists public.cli_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  token_hash text not null unique,
+  name text,
+  scopes text[] not null default array['runner:submit', 'runner:read', 'artifacts:read', 'account:read'],
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  last_used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.cli_device_codes (
+  id uuid primary key default gen_random_uuid(),
+  user_code text not null unique,
+  device_code_hash text not null unique,
+  user_id uuid references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'expired', 'revoked')),
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  approved_at timestamptz
+);
+
+create table if not exists public.runner_plans (
+  id text primary key,
+  max_wall_time_seconds integer not null,
+  max_output_mb integer not null,
+  max_case_bundle_mb integer not null,
+  max_parallel_jobs integer not null,
+  allowed_backends text[] not null,
+  allowed_solvers text[] not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles
+add column if not exists runner_plan_id text references public.runner_plans(id);
+
+insert into public.runner_plans (
+  id,
+  max_wall_time_seconds,
+  max_output_mb,
+  max_case_bundle_mb,
+  max_parallel_jobs,
+  allowed_backends,
+  allowed_solvers
+)
+values (
+  'private_beta',
+  1800,
+  512,
+  32,
+  1,
+  array['openfoam'],
+  array['icoFoam', 'simpleFoam']
+)
+on conflict (id) do nothing;
+
+create table if not exists public.usage_ledger (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  consumption_id uuid references public.run_consumptions(id) on delete set null,
+  provider text not null,
+  backend text not null,
+  estimated_cost_usd numeric,
+  runtime_seconds integer,
+  output_bytes bigint,
+  status text not null,
   created_at timestamptz not null default now()
 );
 
@@ -208,6 +294,10 @@ alter table public.run_tokens enable row level security;
 alter table public.run_consumptions enable row level security;
 alter table public.run_events enable row level security;
 alter table public.run_output_files enable row level security;
+alter table public.cli_tokens enable row level security;
+alter table public.cli_device_codes enable row level security;
+alter table public.runner_plans enable row level security;
+alter table public.usage_ledger enable row level security;
 
 create policy "profiles_select_own"
 on public.profiles
@@ -252,6 +342,24 @@ using (
       and public.run_consumptions.user_id = auth.uid()
   )
 );
+
+create policy "cli_tokens_select_own"
+on public.cli_tokens
+for select
+to authenticated
+using (user_id = auth.uid());
+
+create policy "runner_plans_select_all"
+on public.runner_plans
+for select
+to authenticated
+using (true);
+
+create policy "usage_ledger_select_own"
+on public.usage_ledger
+for select
+to authenticated
+using (user_id = auth.uid());
 
 insert into storage.buckets (id, name, public)
 values ('run-outputs', 'run-outputs', false)

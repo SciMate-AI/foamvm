@@ -26,7 +26,7 @@ function ImagePreview({ name, url }: { name: string; url: string }) {
           download={name}
           href={url}
         >
-          Download
+          下载 / Download
         </a>
       </div>
     </div>
@@ -46,39 +46,56 @@ export default async function AccountPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-8 flex flex-wrap items-center gap-3">
           <Link className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300 transition hover:border-white/30 hover:text-white" href="/">
-            Back to home
+            返回首页 / Home
           </Link>
           <Link className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300 transition hover:border-white/30 hover:text-white" href="/redeem">
-            Redeem token
+            兑换邀请码 / Redeem
           </Link>
           <form action={signOutAction}>
             <button className="rounded-full border border-rose-300/20 bg-rose-300/10 px-3 py-1 text-sm text-rose-100 transition hover:border-rose-200/40" type="submit">
-              Sign out
+              退出登录 / Sign out
             </button>
           </form>
         </div>
 
         <section className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Account</div>
+          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">PhysicsOS Cloud Account / 云账号</div>
           <h1 className="mt-2 text-3xl font-semibold text-white">{viewer.user?.email}</h1>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <div className="text-sm text-slate-400">Ready runs</div>
+              <div className="text-sm text-slate-400">可用运行额度 / Ready runs</div>
               <div className="mt-2 text-4xl font-semibold text-white">{viewer.availableRuns}</div>
             </div>
             <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <div className="text-sm text-slate-400">Consumed runs</div>
+              <div className="text-sm text-slate-400">已消耗运行 / Consumed runs</div>
               <div className="mt-2 text-4xl font-semibold text-white">{viewer.consumedRuns}</div>
             </div>
           </div>
         </section>
 
+        <section className="mb-6 rounded-[28px] border border-cyan-300/15 bg-cyan-300/[0.04] p-6">
+          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">CLI Access / 命令行授权</div>
+          <h2 className="mt-2 text-2xl font-semibold text-white">PhysicsOS 设备码登录 / Device-code Login</h2>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            在本机运行 <code className="rounded bg-black/30 px-2 py-1">physicsos auth login</code>，
+            CLI 会打开授权页并显示设备码。邀请码只在网页端兑换为运行额度，CLI 只保存可撤销访问令牌。
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link className="rounded-full bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200" href="/cli/activate">
+              打开 CLI 授权页 / Activate CLI
+            </Link>
+            <Link className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-200 transition hover:border-white/30" href="/redeem">
+              兑换邀请码 / Redeem invite
+            </Link>
+          </div>
+        </section>
+
         <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Recent runs</div>
+          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">近期运行 / Recent runs</div>
           <div className="mt-5 space-y-3">
             {history.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-white/10 bg-black/10 px-5 py-6 text-sm text-slate-500">
-                No runs recorded yet.
+                暂无运行记录。No runs recorded yet.
               </div>
             ) : history.map((item) => (
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5" key={item.id}>
@@ -103,11 +120,11 @@ export default async function AccountPage() {
         </section>
 
         <section className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
-          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Sandbox outputs</div>
+          <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">沙箱输出 / Sandbox outputs</div>
           <div className="mt-5 space-y-4">
             {outputGroups.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-white/10 bg-black/10 px-5 py-6 text-sm text-slate-500">
-                No stored output files yet.
+                暂无已存储输出文件。No stored output files yet.
               </div>
             ) : outputGroups.map((group) => (
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5" key={group.runId}>
@@ -133,7 +150,7 @@ export default async function AccountPage() {
                 </div>
                 {imageFiles.length > 0 ? (
                   <section className="mt-4">
-                    <div className="mb-3 text-xs uppercase tracking-[0.28em] text-slate-500">Images</div>
+                    <div className="mb-3 text-xs uppercase tracking-[0.28em] text-slate-500">图片 / Images</div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       {imageFiles.map((file) => (
                         <ImagePreview key={file.id} name={file.filename} url={file.url} />
@@ -143,7 +160,7 @@ export default async function AccountPage() {
                 ) : null}
                 {otherFiles.length > 0 ? (
                   <section className="mt-4">
-                    <div className="mb-3 text-xs uppercase tracking-[0.28em] text-slate-500">Files</div>
+                    <div className="mb-3 text-xs uppercase tracking-[0.28em] text-slate-500">文件 / Files</div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {otherFiles.map((file) => (
                     <a

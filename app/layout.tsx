@@ -3,8 +3,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'SciMate | Invite-Gated CFD Runtime',
-  description: 'Run OpenFOAM CFD workloads behind invite-controlled one-time run tokens.',
+  title: 'PhysicsOS Cloud | 物理仿真云端运行平台',
+  description: 'PhysicsOS Cloud provides invite-gated physics simulation runners, starting with CFD/OpenFOAM and CLI device-code access.',
 }
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html className="h-full" lang="en">
+    <html className="h-full" lang="zh-CN">
       <body className="min-h-full bg-slate-950 text-slate-100 antialiased">{children}</body>
     </html>
   )

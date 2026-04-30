@@ -16,12 +16,12 @@ export function RedeemForm() {
   return (
     <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
       <div className="mb-5">
-        <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Redeem a run token</div>
-        <h2 className="mt-2 text-3xl font-semibold text-white">Convert one code into one ready-to-run credit</h2>
+        <div className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">兑换运行邀请码 / Redeem run invite</div>
+        <h2 className="mt-2 text-3xl font-semibold text-white">一个邀请码兑换一次云端求解器运行 / One code becomes one run credit</h2>
       </div>
       <form action={action} className="space-y-4">
         <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Run token</span>
+          <span className="mb-2 block text-sm text-slate-300">邀请码 / Run token</span>
           <input
             className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 font-mono text-white uppercase outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60"
             name="code"
@@ -35,7 +35,7 @@ export function RedeemForm() {
           disabled={pending}
           type="submit"
         >
-          {pending ? 'Redeeming...' : 'Redeem token'}
+          {pending ? '兑换中 / Redeeming...' : '兑换邀请码 / Redeem token'}
         </button>
       </form>
       {state.message ? (

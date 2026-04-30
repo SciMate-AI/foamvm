@@ -12,13 +12,13 @@ export default async function RedeemPage() {
       <div className="mx-auto max-w-3xl">
         <div className="mb-8 flex flex-wrap items-center gap-3">
           <Link className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300 transition hover:border-white/30 hover:text-white" href="/">
-            Back to home
+            返回首页 / Home
           </Link>
           <Link className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300 transition hover:border-white/30 hover:text-white" href="/account">
-            Account
+            账号 / Account
           </Link>
           <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-sm text-cyan-100">
-            {viewer.availableRuns} ready run{viewer.availableRuns === 1 ? '' : 's'}
+            {viewer.availableRuns} 次可用运行 / ready runs
           </div>
         </div>
 

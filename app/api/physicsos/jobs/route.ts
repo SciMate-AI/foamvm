@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { after, NextRequest, NextResponse } from 'next/server'
 
 import { verifyCliBearerToken } from '@/lib/cli-auth'
 import { consumeRunTokenForUser } from '@/lib/run-tokens'
@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
   if (!consumeResult.success || !consumeResult.consumptionId) {
     return NextResponse.json({ error: consumeResult.message }, { status: 403 })
   }
+  const consumptionId = consumeResult.consumptionId
 
   const admin = createAdminSupabaseClient()
   await admin
@@ -39,11 +40,11 @@ export async function POST(request: NextRequest) {
       solver: manifest.openfoam?.solver || manifest.backend_command || null,
       job_manifest: manifest,
     })
-    .eq('id', consumeResult.consumptionId)
+    .eq('id', consumptionId)
 
   await admin.from('usage_ledger').insert({
     user_id: verified.userId,
-    consumption_id: consumeResult.consumptionId,
+    consumption_id: consumptionId,
     provider: 'e2b',
     backend: manifest.backend,
     estimated_cost_usd: null,
@@ -52,15 +53,15 @@ export async function POST(request: NextRequest) {
     status: 'starting',
   })
 
-  await startPhysicsOSOpenFOAMJob({
-    runId: consumeResult.consumptionId,
+  after(() => startPhysicsOSOpenFOAMJob({
+    runId: consumptionId,
     userId: verified.userId,
     manifest,
     remainingRuns: consumeResult.remainingRuns,
-  })
+  }))
 
   return NextResponse.json({
-    job_id: consumeResult.consumptionId,
+    job_id: consumptionId,
     status: 'starting',
     remaining_runs: consumeResult.remainingRuns,
   })

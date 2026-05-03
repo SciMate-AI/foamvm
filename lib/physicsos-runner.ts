@@ -92,7 +92,7 @@ export async function startPhysicsOSOpenFOAMJob(params: {
   manifest: PhysicsOSManifest
   remainingRuns: number
 }) {
-  void runPhysicsOSOpenFOAMJob(params)
+  return runPhysicsOSOpenFOAMJob(params)
 }
 
 async function runPhysicsOSOpenFOAMJob(params: {

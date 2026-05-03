@@ -127,8 +127,19 @@ async function runPhysicsOSOpenFOAMJob(params: {
     const timeoutMs = wallSeconds * 1000
     await runCommand({ runId: params.runId, sandbox, command: 'blockMesh | tee /workspace/output/log.blockMesh', timeoutMs })
     await runCommand({ runId: params.runId, sandbox, command: `${solver} | tee /workspace/output/log.${solver}`, timeoutMs })
+    await runCommand({
+      runId: params.runId,
+      sandbox,
+      command: 'find . -maxdepth 1 -type d | sort | tee /workspace/output/time-directories.txt && find . -maxdepth 1 -type d ! -name . ! -name 0 | grep -Eq "^./[0-9]"',
+      timeoutMs: 10000,
+    })
     await runCommand({ runId: params.runId, sandbox, command: 'foamToVTK | tee /workspace/output/log.foamToVTK', timeoutMs })
-    await runCommand({ runId: params.runId, sandbox, command: 'tar -czf /workspace/output/VTK.tar.gz VTK', timeoutMs: 60000 })
+    await runCommand({
+      runId: params.runId,
+      sandbox,
+      command: '[ -d VTK ] && tar -czf /workspace/output/VTK.tar.gz VTK || (echo "foamToVTK did not produce a VTK directory. Check log.foamToVTK and time-directories.txt." | tee /workspace/output/log.VTK-packaging; exit 1)',
+      timeoutMs: 60000,
+    })
 
     const files = await collectOutputFiles(sandbox)
     await uploadRunOutputs({ userId: params.userId, consumptionId: params.runId, files })

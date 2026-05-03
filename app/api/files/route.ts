@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { getAuthenticatedUser } from '@/lib/auth'
+import { verifyCliBearerToken } from '@/lib/cli-auth'
 import { getOutputBucketName } from '@/lib/env'
 import { getAuthorizedOutputFile } from '@/lib/run-tokens'
 import { createAdminSupabaseClient } from '@/lib/supabase/admin'
@@ -8,11 +9,6 @@ import { createAdminSupabaseClient } from '@/lib/supabase/admin'
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
-  const user = await getAuthenticatedUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   const { searchParams } = new URL(request.url)
   const fileId = searchParams.get('id')
 
@@ -20,9 +16,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing file id' }, { status: 400 })
   }
 
+  const verified = await verifyCliBearerToken(request.headers.get('authorization'))
+  const userId = verified?.scopes.includes('artifacts:read')
+    ? verified.userId
+    : (await getAuthenticatedUser())?.id
+
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const file = await getAuthorizedOutputFile({
     fileId,
-    userId: user.id,
+    userId,
   })
 
   if (!file) {

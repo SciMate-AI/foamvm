@@ -7,6 +7,7 @@ import { createAdminSupabaseClient } from '@/lib/supabase/admin'
 
 const ALLOWED_OPENFOAM_SOLVERS = new Set(['icoFoam', 'simpleFoam'])
 const SAFE_PATH = /^[A-Za-z0-9._/-]+$/
+const OPENFOAM_ENV = 'for f in /opt/openfoam*/etc/bashrc /usr/lib/openfoam/openfoam*/etc/bashrc; do [ -f "$f" ] && . "$f" && break; done'
 
 export interface PhysicsOSManifest {
   schema_version: string
@@ -59,7 +60,7 @@ function shellQuote(value: string): string {
 }
 
 function pipefailCommand(command: string): string {
-  return `bash -o pipefail -lc ${shellQuote(command)}`
+  return `bash -o pipefail -lc ${shellQuote(`${OPENFOAM_ENV}; ${command}`)}`
 }
 
 async function runCommand(params: {

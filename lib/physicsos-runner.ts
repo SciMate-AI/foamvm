@@ -58,6 +58,10 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+function pipefailCommand(command: string): string {
+  return `bash -o pipefail -lc ${shellQuote(command)}`
+}
+
 async function runCommand(params: {
   runId: string
   sandbox: Awaited<ReturnType<typeof createCFDSandbox>>['sandbox']
@@ -102,11 +106,13 @@ async function runPhysicsOSOpenFOAMJob(params: {
   remainingRuns: number
 }) {
   let sessionId: string | null = null
+  let sandbox: Awaited<ReturnType<typeof createCFDSandbox>>['sandbox'] | null = null
 
   try {
     await appendRunEvent({ consumptionId: params.runId, payload: { type: 'credit', remainingRuns: params.remainingRuns } })
     await appendRunEvent({ consumptionId: params.runId, payload: { type: 'status', message: 'Creating PhysicsOS OpenFOAM sandbox...' } })
-    const { sandbox, sessionId: createdSessionId } = await createCFDSandbox()
+    const { sandbox: createdSandbox, sessionId: createdSessionId } = await createCFDSandbox()
+    sandbox = createdSandbox
     sessionId = createdSessionId
     const solver = params.manifest.openfoam?.solver || params.manifest.backend_command || 'icoFoam'
 
@@ -125,19 +131,19 @@ async function runPhysicsOSOpenFOAMJob(params: {
 
     const wallSeconds = Math.min(Math.max(Number(params.manifest.budget?.max_wall_time_seconds ?? 600), 30), 1800)
     const timeoutMs = wallSeconds * 1000
-    await runCommand({ runId: params.runId, sandbox, command: 'blockMesh | tee /workspace/output/log.blockMesh', timeoutMs })
-    await runCommand({ runId: params.runId, sandbox, command: `${solver} | tee /workspace/output/log.${solver}`, timeoutMs })
+    await runCommand({ runId: params.runId, sandbox, command: pipefailCommand('blockMesh | tee /workspace/output/log.blockMesh'), timeoutMs })
+    await runCommand({ runId: params.runId, sandbox, command: pipefailCommand(`${solver} | tee /workspace/output/log.${solver}`), timeoutMs })
     await runCommand({
       runId: params.runId,
       sandbox,
-      command: 'find . -maxdepth 1 -type d | sort | tee /workspace/output/time-directories.txt && find . -maxdepth 1 -type d ! -name . ! -name 0 | grep -Eq "^./[0-9]"',
+      command: pipefailCommand('find . -maxdepth 1 -type d | sort | tee /workspace/output/time-directories.txt && find . -maxdepth 1 -type d ! -name . ! -name 0 | grep -Eq "^./[0-9]"'),
       timeoutMs: 10000,
     })
-    await runCommand({ runId: params.runId, sandbox, command: 'foamToVTK | tee /workspace/output/log.foamToVTK', timeoutMs })
+    await runCommand({ runId: params.runId, sandbox, command: pipefailCommand('foamToVTK | tee /workspace/output/log.foamToVTK'), timeoutMs })
     await runCommand({
       runId: params.runId,
       sandbox,
-      command: '[ -d VTK ] && tar -czf /workspace/output/VTK.tar.gz VTK || (echo "foamToVTK did not produce a VTK directory. Check log.foamToVTK and time-directories.txt." | tee /workspace/output/log.VTK-packaging; exit 1)',
+      command: pipefailCommand('[ -d VTK ] && tar -czf /workspace/output/VTK.tar.gz VTK || (echo "foamToVTK did not produce a VTK directory. Check log.foamToVTK and time-directories.txt." | tee /workspace/output/log.VTK-packaging; exit 1)'),
       timeoutMs: 60000,
     })
 
@@ -160,6 +166,16 @@ async function runPhysicsOSOpenFOAMJob(params: {
     await appendRunEvent({ consumptionId: params.runId, payload: { type: 'done', sessionId } })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    if (sandbox) {
+      try {
+        const files = await collectOutputFiles(sandbox)
+        if (files.length > 0) {
+          await uploadRunOutputs({ userId: params.userId, consumptionId: params.runId, files })
+        }
+      } catch {
+        // Preserve the original solver failure even if diagnostic upload fails.
+      }
+    }
     await updateRunConsumption({
       consumptionId: params.runId,
       status: 'failed',
